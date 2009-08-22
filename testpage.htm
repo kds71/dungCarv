@@ -1,0 +1,111 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en">
+  <head>
+    <title>dungCarv test page</title>
+    <style type="text/css">
+      #result { position: relative; border: 1px solid #000; background: #fff; padding: 1px; }
+      #result div { position: absolute; width: 10px; height: 10px; }
+      #result .corridor { background: #fff; }
+      #result .wall { background: #000; }
+      #result .room { background: #6b6; }
+      #result .door { background: #cc8; }
+      #result .entrance { background: #a33; }
+      #result .exit { background: #34e; }
+    </style>
+  </head>
+  <body>
+    <h1>dungCarv Javascript version - test page</h1>
+    <p>
+      <strong>Note:</strong>
+      This is only demo page. It generates and displays map with given parameters.
+      It may take some time after you click &quot;generate&quot; button, before you
+      will see generated map. Don't worry - map is generated quickly, but display
+      routine is not the best and may take some time, especially when map is big.
+    </p>
+    <div id="settings">
+      <fieldset>
+        <label for="i_width">Width:</label>
+        <input type="text" id="i_width" size="3" value="40" />
+        <label for="i_height">Height:</label>
+        <input type="text" id="i_height" size="3" value="40" />
+        <label for="i_padding">Padding:</label>
+        <input type="text" id="i_padding" size="3" value="1" />
+      </fieldset>
+      <fieldset>
+        <label for="i_randomness">Randomness (0-100):</label>
+        <input type="text" id="i_randomness" size="3" value="10" />
+        <label for="i_twistness">Twistness (0-100):</label>
+        <input type="text" id="i_twistness" size="3" value="30" />
+      </fieldset>
+      <fieldset>
+        <input type="button" id="i_generate" value="Generate" />
+      </fieldset>
+    </div>
+    <div id="result"></div>
+    <script type="text/javascript" src="dungCarv.js"></script>
+    <script type="text/javascript">
+      // -- addEvent by John Resig ---------------------------------------
+      function addEvent( obj, type, fn ) {
+        if ( obj.attachEvent ) {
+          obj['e'+type+fn] = fn;
+          obj[type+fn] = function(){obj['e'+type+fn]( window.event );}
+          obj.attachEvent( 'on'+type, obj[type+fn] );
+        } else
+          obj.addEventListener( type, fn, false );
+      }
+      // -----------------------------------------------------------------
+
+      function read(n) {
+        return parseInt(document.getElementById(n).value, 10);
+      }
+
+      addEvent(window, 'load', function() {
+        addEvent(document.getElementById('i_generate'), 'click', function() {
+          var mw = read('i_width');
+          var mh = read('i_height');
+          var pdg = read('i_padding');
+          var rnd = read('i_randomness');
+          var twi = read('i_twistness');
+
+          var r = dungCarv({
+            mapWidth: mw,
+            mapHeight: mh,
+            padding: pdg,
+            randomness: rnd / 100.0,
+            twistness: twi / 100.0
+          });
+
+          if (r.success)
+            displayMap(r.map, mw, mh);
+          else
+            alert('failed');
+        });
+      });
+
+      function displayMap(map, w, h) {
+        var dm = document.getElementById('result');
+        dm.innerHTML = '';
+        dm.style.width = (w*10)+'px';
+        dm.style.height = (h*10)+'px';
+        for (var x = 0; x < w; x++) {
+          for (var y = 0; y < h; y++) {
+            var t = map[x+y*w];
+            var cln = 'wall';
+            switch (t) {
+            case 1: cln = 'corridor'; break;
+            case 2: cln = 'room'; break;
+            case 3: cln = 'door'; break;
+            case 4: cln = 'entrance'; break;
+            case 5: cln = 'exit'; break;
+            }
+            var d = document.createElement('div');
+            d.style.left = (1+x*10)+'px';
+            d.style.top = (1+y*10)+'px';
+            d.className = cln;
+            dm.appendChild(d);
+          }
+        }
+      }
+    </script>
+  </body>
+</html>
