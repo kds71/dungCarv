@@ -67,7 +67,12 @@ function dungCarv(options) {
     /* Constants */
     
     // It is impossible to use const keyword, because it doesn't work in IE.
+<<<<<<< HEAD
     // The solution is to use normal variables and pretend they are constants.
+=======
+    // Everything that can be done is usage of normal variables and pretend
+    // that they are constants.
+>>>>>>> origin/master
 
     MAP_WIDTH:       options.mapWidth,
     MAP_HEIGHT:      options.mapHeight,
