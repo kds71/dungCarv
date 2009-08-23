@@ -26,18 +26,7 @@
   ===========================================================================
 */ 
 
-function trace(msg) {
-  if (!console) return;
-  if (!console.log) return;
 
-  if (arguments.length > 1) {
-    for (var i = 1; i < arguments.length; i++) {
-      msg = msg.replace('%'+i, arguments[i]);
-    }
-  }
-
-  console.log(msg);
-}
 
 // Extending array prototype by function which returns random array cell,
 // removing it from array.
@@ -55,6 +44,7 @@ Math.rnd = function(a, b) {
   return Math.floor(Math.random() * (b - a + 1)) + a;
 }
 
+/* MAIN FUNCTION */
 function dungCarv(options) {
   // Set default values for some options (if they are undefined).
   if (!options.padding) options.padding = 1;
@@ -68,11 +58,17 @@ function dungCarv(options) {
     };
   }
 
-  var carver = {
+  /* Main object - dungeon carver */
+  
+  // To prevent name collisions object is created with object initializer
+  // inside anonymous namespace.
+
+  return ({
     /* Constants */
     
     // It is impossible to use const keyword, because it doesn't work in IE.
-    // Only thing to do is use normal variables and pretend they are constants.
+    // Everything that can be done is usage of normal variables and pretend
+    // that they are constants.
 
     MAP_WIDTH:       options.mapWidth,
     MAP_HEIGHT:      options.mapHeight,
@@ -101,13 +97,16 @@ function dungCarv(options) {
     map:             [],
     queue:           [],
     success:         false,
-    finished:        false,
     started:         false,
+    finished:        false,
     dir:             this.DIR_NONE,
     elem:            null,
-    depth:           0,
 
     /* Functions */
+
+    // create() function is called after creating object.
+    // It calls other functions in order to generate and return
+    // dungeon map.
 
     create: function() {
       this.fill(this.TILE_WALL);
@@ -115,13 +114,22 @@ function dungCarv(options) {
       return this.returnValue();
     },
 
+    // generate() contains main loop of maze generating routine
+
     generate: function() {
       while (!this.finished) {
         this.step();
       }
     },
 
+    // step() executes single step in main loop of maze generation
+    // routine. It is easier to maintain this procedure when it is
+    // stored in other function, called from main loop.
+
     step: function() {
+      // First step. If dungCarv() function was called without
+      // data describing entrance coordinates, these coordinates
+      // will be chosen randomly.
       if (!this.started) {
         var x;
         var y;
@@ -140,6 +148,8 @@ function dungCarv(options) {
         return;
       }
 
+      // Option "randomness" in action - if there is selected element and queue
+      // isn't empty, it is possible that another element will be chosen.
       if (this.elem && this.queue.length > 0 && Math.random() < options.randomness) {
         var x = this.elem.x;
         var y = this.elem.y;
@@ -147,6 +157,8 @@ function dungCarv(options) {
         this.queue.push({x:x,y:y});
       }
 
+      // If there is no selected element, we have to select one.
+      // If there are no elements to select left, we finished carving maze.
       if (!this.elem) {
         if (this.queue.length == 0) {
           this.finished = true;
@@ -156,15 +168,21 @@ function dungCarv(options) {
         }
       }
 
+      // Check for avaible ways to carve. If there are no ways, drop
+      // selected element - it is useless now.
       var dirs = this.avaibleDir(this.elem.x, this.elem.y);
       if (dirs.length == 0) {
         this.elem = null;
         return;
       }
 
+      // Option "twistness" in action - if carver can't carve in current
+      // directory anymore OR obtained random value is lower than "twistness",
+      // there is a need to change carving direction.
       if (dirs.indexOf(this.dir) == -1 || Math.random() < options.twistness)
         this.dir = dirs.rnd();
 
+      // Just move in valid direction.
       switch (this.dir) {
       case this.DIR_UP:
         this.elem.y--;
@@ -180,25 +198,57 @@ function dungCarv(options) {
         break;
       }
 
-      this.queue.push({x:this.elem.x,y:this.elem.y});
+      // There is a new corridor in this place, store it in map array.
       this.set(this.elem.x, this.elem.y, this.TILE_CORRIDOR);
+
+      // Insert new element in queue - carver will back to it later.
+      this.queue.push({x:this.elem.x,y:this.elem.y});
     },
 
+    // Simple functions used to manage map array easier.
+
     set: function(x, y, tile) {
-      // trace('setting %1 %2 to %3', x, y, tile);
       this.map[this.xy(x, y)] = tile;
     },
 
+    xy: function(x, y) {
+      return x + y * options.mapWidth;
+    },
+
+    // avaibleDir() checks every direction to determine all directions avaible 
+    // for carving (for given point x,y).
+
     avaibleDir: function(x, y) {
       var d = [];
-      if (this.testMove(x, y - 1, this.DIR_UP)) d.push(this.DIR_UP);
-      if (this.testMove(x + 1, y, this.DIR_RIGHT)) d.push(this.DIR_RIGHT);
-      if (this.testMove(x, y + 1, this.DIR_DOWN)) d.push(this.DIR_DOWN);
-      if (this.testMove(x - 1, y, this.DIR_LEFT)) d.push(this.DIR_LEFT);
+      if (this.canCarve(x, y - 1, this.DIR_UP)) d.push(this.DIR_UP);
+      if (this.canCarve(x + 1, y, this.DIR_RIGHT)) d.push(this.DIR_RIGHT);
+      if (this.canCarve(x, y + 1, this.DIR_DOWN)) d.push(this.DIR_DOWN);
+      if (this.canCarve(x - 1, y, this.DIR_LEFT)) d.push(this.DIR_LEFT);
       return d;
     },
 
-    testMove: function(x, y, dir) {
+    // canCarve() returns true when target tile and all tiles around
+    // target tile are occupied by wall. Examples (^ shows position of carver
+    // before digging next corridor):
+    //
+    // ### 1. Valid. Carver can carve here.
+    // ### 
+    // .^. 
+    // 
+    // ... 2. Invalid. Carving will create loop.
+    // ### 
+    // .^. 
+    // 
+    // ### 3. Invalid. There is no wall on target tile.
+    // #.# 
+    // .^. 
+    // 
+    // ##. 4. Invalid. Carver refuse to create corridor tiles
+    // ###    connected diagonally (due to aesthetical reasons).
+    // .^. 
+    // 
+
+    canCarve: function(x, y, dir) {
       var bound = {};
       switch (dir) {
       case this.DIR_UP:
@@ -222,11 +272,20 @@ function dungCarv(options) {
       return true;
     },
 
+    // testTile() is simple function which checks content of tile.
+    // It return false:
+    // - when tile is outside defined bounds
+    // - when tile content is different than every tile in array
+    //   passed as argument to testTile()
+
     testTile: function(x, y, tiles) {
       if (x < this.BOUND_LEFT-1 || x > this.BOUND_RIGHT+1) return false;
       if (y < this.BOUND_TOP-1 || y > this.BOUND_BOTTOM+1) return false;
       return tiles.indexOf(this.map[this.xy(x, y)]) != -1;
     },
+
+    // This function generates object which will be returned to user after
+    // creating dungeon.
 
     returnValue: function() {
       this.success = true;
@@ -250,13 +309,11 @@ function dungCarv(options) {
       return rv;
     },
 
-    xy: function(x, y) {
-      return x + y * options.mapWidth;
-    },
+    // Fill area with given tile. If area is not defined, fill whole map.
 
     fill: function(tile, area) {
       if (typeof area == 'undefined') {
-        area = { sx: 0, sy: 0, ex: options.mapWidth - 1, ey: options.mapHeight - 1 };
+        area = { sx: 0, sy: 0, ex: this.MAP_WIDTH - 1, ey: this.MAP_HEIGHT - 1 };
       }
 
       var xy = this.xy;
@@ -267,7 +324,7 @@ function dungCarv(options) {
         }
       }
     }
-  };
 
-  return carver.create();
+  // end of anonymous namespace...
+  }).create();
 }
