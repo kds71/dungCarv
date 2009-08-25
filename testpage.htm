@@ -8,7 +8,7 @@
       #result .corridor { background: #fff; }
       #result .wall { background: #000; }
       #result .room { background: #6b6; }
-      #result .door { background: #cc8; }
+      #result .door { background: #cc4; }
       #result .entrance { background: #a33; }
       #result .exit { background: #34e; }
     </style>
@@ -38,7 +38,33 @@
         <input type="text" id="i_twistness" size="3" value="30" />
       </fieldset>
       <fieldset>
+        <label for="i_rooms">Rooms (0-100, shouldn't be greater than 30-40):</label>
+        <input type="text" id="i_rooms" size="3" value="10" />
+        <input type="checkbox" id="i_roomround" />
+        <label for="i_roomround">Round rooms corners (create cave-like rooms)</label>
+      </fieldset>
+      <fieldset>
+        <label for="i_roomsize">Room sizes (probability has to sum up to 1.0):</label>
+        <textarea rows="5" cols="40" id="i_roomsize">[{ min: 3, max: 5, prob: 0.3 }, 
+{ min: 6, max: 9, prob: 0.5 },
+{ min: 10, max: 12, prob: 0.2 }]</textarea>
+      </fieldset>
+      <fieldset>
         <input type="button" id="i_generate" value="Generate" />
+      </fieldset>
+      <fieldset>
+        <label for="i_loops">Loops (0-100):</label>
+        <input type="text" id="i_loops" size="3" value="50" />
+        <label for="i_spaces">Spaces (0-XX, shouldn't be greater than 50):</label>
+        <input type="text" id="i_spaces" size="3" value="5" />
+        <label for="i_loopspacerepeat">Loop / space repeats (0-XX, shouldn't be greater than 2-3):</label>
+        <input type="text" id="i_loopspacerepeat" size="1" value="1" />
+      </fieldset>
+      <fieldset>
+        <input type="checkbox" id="i_roomdeadend" />
+        <label for="i_roomdeadend">Remove single-tile dead-ends near rooms</label>
+        <input type="checkbox" id="i_startspaces" />
+        <label for="i_startspaces">Remove spaces before first &quot;make loops&quot;</label>
       </fieldset>
     </div>
     <div id="result"></div>
@@ -66,13 +92,29 @@
           var pdg = read('i_padding');
           var rnd = read('i_randomness');
           var twi = read('i_twistness');
+          var rom = read('i_rooms');
+          var lop = read('i_loops');
+          var spc = read('i_spaces');
+          var lsr = read('i_loopspacerepeat');
+          eval('var rs = '+document.getElementById('i_roomsize').value+';');
+          var rde = document.getElementById('i_roomdeadend').checked;
+          var sbl = document.getElementById('i_startspaces').checked;
+          var rrc = document.getElementById('i_roomround').checked;
 
           var r = dungCarv({
             mapWidth: mw,
             mapHeight: mh,
             padding: pdg,
             randomness: rnd / 100.0,
-            twistness: twi / 100.0
+            twistness: twi / 100.0,
+            rooms: rom / 100.0,
+            roomSize: rs,
+            roomRound: rrc,
+            loops: lop / 100.0,
+            spaces: spc,
+            loopSpaceRepeat: lsr,
+            eraseRoomDeadEnds: rde,
+            spacesBeforeLoops: sbl
           });
 
           if (r.success)

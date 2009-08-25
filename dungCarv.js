@@ -50,6 +50,12 @@ function dungCarv(options) {
   if (!options.padding) options.padding = 1;
   if (!options.randomness) options.randomness = 0.0;
   if (!options.twistness) options.twistness = 0.0;
+  if (!options.loops) options.loops = 0.0;
+  if (!options.spaces) options.spaces = 0;
+  if (!options.loopSpaceRepeat) options.loopSpaceRepeat = 1;
+  if (!options.roomSize) options.roomSize = [];
+  // Set probability of placing rooms to 0 if there are no room sizes specified.
+  if (!options.rooms || options.roomSize.length == 0) options.rooms = 0.0;
 
   // Some options have to be set.
   if (!options.mapWidth || !options.mapHeight) {
@@ -78,7 +84,8 @@ function dungCarv(options) {
     TILE_DOOR:       3,
     TILE_ENTRANCE:   4,
     TILE_EXIT:       5,
-    TILE_WALL_LOOP:  6,
+    TILE_ROOM_TMP:   9998,
+    TILE_WALL_TMP:   9999,
 
     BOUND_TOP:       options.padding,
     BOUND_RIGHT:     options.mapWidth - options.padding - 1,
@@ -108,8 +115,25 @@ function dungCarv(options) {
     // dungeon map.
 
     create: function() {
+      // First step: fill whole map with walls.
       this.fill(this.TILE_WALL);
+      // Second step: generate basic maze with rooms.
       this.generate();
+      // Third step: make some loops and erase some dead-ends in
+      // order to make more space between rooms and corridors.
+      if (options.loopSpaceRepeat > 0 && options.spacesBeforeLoops && options.spaces > 0)
+        this.makeSpaces();
+      for (var i = 0; i < options.loopSpaceRepeat; i++) {
+        if (options.loops > 0.0)
+          this.makeLoops();
+        if (options.spaces > 0)
+          this.makeSpaces();
+      }
+      // Fourth step: erase single-tile dead-ends growing from rooms.
+      if (options.eraseRoomDeadEnds)
+        this.eraseRoomDeadEnds();
+
+      // Return generated map.
       return this.returnValue();
     },
 
@@ -197,6 +221,16 @@ function dungCarv(options) {
         break;
       }
 
+      // Check if there should be room placed now.
+      if (Math.random() < options.rooms) {
+        // Check if it is possible to place room.
+        if (this.placeRoom(this.elem.x, this.elem.y, this.dir)) {
+          this.queue.push({x:this.elem.x,y:this.elem.y});
+          this.elem = null;
+          return;
+        }
+      }
+
       // There is a new corridor in this place, store it in map array.
       this.set(this.elem.x, this.elem.y, this.TILE_CORRIDOR);
 
@@ -204,8 +238,258 @@ function dungCarv(options) {
       this.queue.push({x:this.elem.x,y:this.elem.y});
     },
 
-    // Simple functions used to manage map array easier.
+    // This function places room in given place (if possible)
+    placeRoom: function(ex, ey, dir) {
+      // Randomly choose room size.
+      var s = Math.random();
+      var t = 0.0;
+      var n = -1;
+      var rs;
 
+      for (var i = 0; i < options.roomSize.length; i++) {
+        rs = options.roomSize[i];
+        t += rs.prob;
+        if (t > s) {
+          n = i;
+          break;
+        }
+      }
+
+      // n == -1 may happen when total probability of choosing room sizes 
+      // doesn't sum up to 1.0 (when options.roomSize array is invalid). 
+      // For example:
+      // 
+      //   options.roomSize = [
+      //     { min: 3, max: 5, prob: 0.3 },
+      //     { min: 6, max: 10, prob: 0.3 },
+      //     { min: 11, max: 15, prob: 0.3 }
+      //   ]
+      //
+      // Probability to choose each of these sizes is 3/10. Variable 's'
+      // determines which size will be chosen:
+      //
+      // - when 0.0 <= s < 0.3, first size will be chosen
+      // - when 0.3 <= s < 0.6, second size will be chosen
+      // - when 0.6 <= s < 0.9, third size will be chosen
+      //
+      // Variable 's' has value in range [0.0, 1.0). In this case,
+      // if value of variable 's' is higher or equal than 0.9,
+      // no room will be chosen and value of variable 'n' will be -1.
+      //
+      // Probablity in options.roomSize array ALWAYS must sum up to 1.0!
+      if (n == -1) return false;
+
+      // Randomly choose width and height of room (in range determined
+      // by selected room size).
+      rs = options.roomSize[n];
+      var w = Math.rnd(rs.min, rs.max);
+      var h = Math.rnd(rs.min, rs.max);
+
+      // Find all possible places to carve room with given parameters
+      // (width, height, entrance coordinates ex and ey, direction dir).
+      var placements = [];
+      var bounds = {};
+      
+      switch (dir) {
+      case this.DIR_UP:
+        bounds = { t: ey - h, r: ex, b: ey - h, l: ex - w + 1 };
+        break;
+      case this.DIR_RIGHT:
+        bounds = { t: ey - h + 1, r: ex + 1, b: ey, l: ex + 1 };
+        break;
+      case this.DIR_DOWN:
+        bounds = { t: ey + 1, r: ex, b: ey + 1, l: ex - w + 1 };
+        break;
+      case this.DIR_LEFT:
+        bounds = { t: ey - h + 1, r: ex - w + 1, b: ey, l: ex - w + 1 };
+        break;
+      }
+
+      for (var sx = bounds.l; sx <= bounds.r; sx++) {
+        for (var sy = bounds.t; sy <= bounds.b; sy++) {
+          var is_ok = true;
+          for (var x = sx - 1; x <= sx + w; x++) {
+            for (var y = sy - 1; y <= sy + h; y++) {
+              if (!this.testTile(x, y, [this.TILE_WALL])) {
+                is_ok = false;
+                break;
+              }
+              if (!is_ok) break;
+            }
+          }
+          if (is_ok) {
+            placements.push({x:sx,y:sy});
+          }
+        }
+      }
+
+      // placements array is empty if there is no place for room
+      // with given parameters.
+      if (placements.length == 0) return false;
+
+      // Place corridor at entrance.
+      this.set(ex, ey, this.TILE_CORRIDOR);
+
+      // Choose one of places randomly.
+      var placement = placements.rnd();
+
+      // Fill area with temporary room tiles.
+      for (var x = placement.x; x < placement.x + w; x++) {
+        for (var y = placement.y; y < placement.y + h; y++) {
+          this.set(x, y, this.TILE_ROOM_TMP);
+        }
+      }
+
+      // Carve room in this place.
+      for (var x = placement.x; x < placement.x + w; x++) {
+        for (var y = placement.y; y < placement.y + h; y++) {
+          // Check if we should round corner of this room.
+          if (!options.roomRound || !this.roundCorner(x, y, placement.x, placement.y, w, h)) {
+            // All tiles placed on edge of room should be added to
+            // queue, so new corridors and rooms will be able to
+            // grow from them.
+            if (x == placement.x || x == placement.x + w - 1
+            ||  y == placement.y || y == placement.y + h - 1) {
+              this.queue.push({x:x,y:y});
+            }
+            this.set(x, y, this.TILE_ROOM);
+          } else {
+            this.set(x, y, this.TILE_WALL);
+          }
+        }
+      }
+
+      // Room is ready :)
+      return true;
+    },
+
+    // This function is used when room is being placed and checks if
+    // specific tile should be removed from room in order to make
+    // room with rounded (cave-like) corners.
+    roundCorner: function(x, y, sx, sy, w, h) {
+      return false;
+      // TODO
+    },
+
+    // Make loops in dungeon.
+    // Function finds dead-ends (corridor tiles with only one adjacent
+    // corridor or room tile), marks some of them and runs generate
+    // routine again. Marked tiles are treat as walls, so it is possible
+    // that generator will connect corridors or rooms with them.
+    // After generating maze, function will replace marked tiles with
+    // corridors again. 
+    makeLoops: function() {
+      var deadend = [];
+      // marked array will contain list of all corridor tiles.
+      // All these tiles will be added to maze-generator queue.
+      var marked = [];
+      // Mark all tiles.
+      for (var x = this.BOUND_LEFT; x <= this.BOUND_RIGHT; x++) {
+        for (var y = this.BOUND_TOP; y <= this.BOUND_BOTTOM; y++) {
+          marked[this.xy(x,y)] = true;
+        }
+      }
+
+      for (var x = this.BOUND_LEFT; x <= this.BOUND_RIGHT; x++) {
+        for (var y = this.BOUND_TOP; y <= this.BOUND_BOTTOM; y++) {
+          var pos = this.xy(x, y);
+          // Test if tile is wall.
+          if (this.testTile(x, y, [this.TILE_WALL])) {
+            marked[pos] = false;
+          } else {
+            // Remove tile only when:
+            // - rolled value lower than probability;
+            // - tile has only one adjacent corridor or room tile.
+            var adj = this.adjacent(x, y);
+            if (adj.length == 1 && Math.random() < options.loops) {
+              var t = adj.pop();
+              // Unmark this tile and adjacent tile.
+              marked[pos] = false;
+              marked[this.xy(t.x, t.y)] = false;
+
+              // This tile will be replaced with wall (removed).
+              deadend.push({x:x,y:y});
+
+              var s = this.map[this.xy(t.x, t.y)];
+              this.set(t.x, t.y, this.TILE_WALL);
+              // Unmark tiles adjacent diagonally.
+              var d = this.diagonal(x, y);
+              for (var i = 0; i < d.length; i++) {
+                marked[this.xy(d[i].x, d[i].y)] = false;
+              }
+              this.set(t.x, t.y, s);
+            }
+          }
+        }
+      }
+
+      // Return if there were no dead-ends removed.
+      if (deadend.length == 0) return;
+
+      // Push all marked tiles into queue.
+      for (var x = this.BOUND_LEFT; x <= this.BOUND_RIGHT; x++) {
+        for (var y = this.BOUND_TOP; y <= this.BOUND_BOTTOM; y++) {
+          if (marked[this.xy(x, y)])
+            this.queue.push({x:x,y:y});
+        }
+      }
+
+      // Remove dead-ends.
+      for (var i = 0; i < deadend.length; i++) {
+        this.set(deadend[i].x, deadend[i].y, this.TILE_WALL_TMP);
+      }
+
+      // Run generate routine again.
+      this.finished = false;
+      this.generate();
+
+      // Restore removed dead-ends.
+      for (var i = 0; i < deadend.length; i++) {
+        this.set(deadend[i].x, deadend[i].y, this.TILE_CORRIDOR);
+      }
+    },
+
+    // This function removes all dead-ends in order to make more space.
+    // Routine is repeated few times (based on options.spaces argument).
+    makeSpaces: function() {
+      for (var i = 0; i < options.spaces; i++) {
+        var deadend = [];
+        for (var x = this.BOUND_LEFT; x <= this.BOUND_RIGHT; x++) {
+          for (var y = this.BOUND_TOP; y <= this.BOUND_BOTTOM; y++) {
+            // Check only corridors.
+            if (!this.testTile(x, y, [this.TILE_CORRIDOR])) continue;
+            // Get adjacent corridor of room tiles.
+            var adj = this.adjacent(x, y);
+            // Check if tile has only one adjacent corridor or room tile.
+            if (adj.length != 1) continue;
+            deadend.push({x:x,y:y});
+          }
+        }
+        for (var j = 0; j < deadend.length; j++) {
+          this.set(deadend[j].x, deadend[j].y, this.TILE_WALL);
+        }
+      }
+    },
+
+    // This function removes all dead-ends connected directly with rooms.
+    eraseRoomDeadEnds: function() {
+      for (var x = this.BOUND_LEFT; x <= this.BOUND_RIGHT; x++) {
+        for (var y = this.BOUND_TOP; y <= this.BOUND_BOTTOM; y++) {
+          // Check only corridors.
+          if (!this.testTile(x, y, [this.TILE_CORRIDOR])) continue;
+          // Get adjacent corridor of room tiles.
+          var adj = this.adjacent(x, y);
+          // Check if tile has only one adjacent corridor or room tile.
+          if (adj.length != 1) continue;
+          // Check if adjacent tile is room.
+          if (this.testTile(adj[0].x, adj[0].y, [this.TILE_ROOM]));
+          // Remove tile.
+          this.set(x, y, this.TILE_WALL);
+        }
+      }
+    },
+
+    // Simple functions used to manage map array easier.
     set: function(x, y, tile) {
       this.map[this.xy(x, y)] = tile;
     },
@@ -216,13 +500,12 @@ function dungCarv(options) {
 
     // avaibleDir() checks every direction to determine all directions avaible 
     // for carving (for given point x,y).
-
     avaibleDir: function(x, y) {
       var d = [];
-      if (this.canCarve(x, y - 1, this.DIR_UP)) d.push(this.DIR_UP);
-      if (this.canCarve(x + 1, y, this.DIR_RIGHT)) d.push(this.DIR_RIGHT);
-      if (this.canCarve(x, y + 1, this.DIR_DOWN)) d.push(this.DIR_DOWN);
-      if (this.canCarve(x - 1, y, this.DIR_LEFT)) d.push(this.DIR_LEFT);
+      if (this.canCarve(x, y - 1)) d.push(this.DIR_UP);
+      if (this.canCarve(x + 1, y)) d.push(this.DIR_RIGHT);
+      if (this.canCarve(x, y + 1)) d.push(this.DIR_DOWN);
+      if (this.canCarve(x - 1, y)) d.push(this.DIR_LEFT);
       return d;
     },
 
@@ -246,29 +529,37 @@ function dungCarv(options) {
     // ###    connected diagonally (due to aesthetical reasons).
     // .^. 
     // 
-
     canCarve: function(x, y, dir) {
-      var bound = {};
-      switch (dir) {
-      case this.DIR_UP:
-        bound = { l: x - 1, t: y - 1, r: x + 1, d: y };
-        break;
-      case this.DIR_RIGHT:
-        bound = { l: x, t: y - 1, r: x + 1, d: y + 1 };
-        break;
-      case this.DIR_DOWN:
-        bound = { l: x - 1, t: y, r: x + 1, d: y + 1 };
-        break;
-      case this.DIR_LEFT:
-        bound = { l: x - 1, t: y - 1, r: x, d: y + 1 };
-        break;
-      }
-      for (var x = bound.l; x <= bound.r; x++) {
-        for (var y = bound.t; y <= bound.d; y++) {
-          if (!this.testTile(x, y, [this.TILE_WALL])) return false;
-        }
-      }
+      if (!this.testTile(x, y, [this.TILE_WALL])) return false;
+      var a = this.adjacent(x, y);
+      var d = this.diagonal(x, y);
+      if (a.length != 1) return false;
+      if (d.length != 0) return false;
       return true;
+    },
+
+    // This function finds all corridor or room tiles connected to given
+    // tile and returns array containing coordinates of these tiles.
+    adjacent: function(x, y) {
+      var res = [];
+      var test = [this.TILE_ROOM, this.TILE_CORRIDOR, this.TILE_ENTRANCE];
+      if (this.testTile(x, y - 1, test)) res.push({x:x,y:y-1});
+      if (this.testTile(x + 1, y, test)) res.push({x:x+1,y:y});
+      if (this.testTile(x, y + 1, test)) res.push({x:x,y:y+1});
+      if (this.testTile(x - 1, y, test)) res.push({x:x-1,y:y});
+      return res;
+    },
+
+    // This function finds all corridor or room tiles adjacent diagonally to
+    // given tile and returns array containing coordinates of these tiles.
+    diagonal: function(x, y) {
+      var res = [];
+      var test = [this.TILE_WALL, this.TILE_WALL_TMP];
+      if (!this.testTile(x-1, y-1, test) && this.testTile(x-1, y, test) && this.testTile(x, y-1, test)) res.push({x:x-1,y:y-1});
+      if (!this.testTile(x+1, y-1, test) && this.testTile(x+1, y, test) && this.testTile(x, y-1, test)) res.push({x:x+1,y:y-1});
+      if (!this.testTile(x+1, y+1, test) && this.testTile(x+1, y, test) && this.testTile(x, y+1, test)) res.push({x:x+1,y:y+1});
+      if (!this.testTile(x-1, y+1, test) && this.testTile(x-1, y, test) && this.testTile(x, y+1, test)) res.push({x:x-1,y:y+1});
+      return res;
     },
 
     // testTile() is simple function which checks content of tile.
@@ -278,8 +569,8 @@ function dungCarv(options) {
     //   passed as argument to testTile()
 
     testTile: function(x, y, tiles) {
-      if (x < this.BOUND_LEFT-1 || x > this.BOUND_RIGHT+1) return false;
-      if (y < this.BOUND_TOP-1 || y > this.BOUND_BOTTOM+1) return false;
+      if (x < this.BOUND_LEFT || x > this.BOUND_RIGHT) return false;
+      if (y < this.BOUND_TOP || y > this.BOUND_BOTTOM) return false;
       return tiles.indexOf(this.map[this.xy(x, y)]) != -1;
     },
 
@@ -308,17 +599,11 @@ function dungCarv(options) {
       return rv;
     },
 
-    // Fill area with given tile. If area is not defined, fill whole map.
-
-    fill: function(tile, area) {
-      if (typeof area == 'undefined') {
-        area = { sx: 0, sy: 0, ex: this.MAP_WIDTH - 1, ey: this.MAP_HEIGHT - 1 };
-      }
-
+    // Fill whole map with given tile.
+    fill: function(tile) {
       var xy = this.xy;
-
-      for (var x = area.sx; x <= area.ex; x++) {
-        for (var y = area.sy; y <= area.ey; y++) {
+      for (var x = 0; x < this.MAP_WIDTH; x++) {
+        for (var y = 0; y < this.MAP_HEIGHT; y++) {
           this.map[xy(x,y)] = tile;
         }
       }
